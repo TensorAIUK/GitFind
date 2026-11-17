@@ -190,6 +190,37 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
   const perPage = 15;
   const maxPages = totalCount ? Math.min(Math.ceil(totalCount / perPage), 66) : 1;
+  const resultsTopRef = useRef<HTMLElement | null>(null);
+
+  const handlePageChange = (nextPage: number) => {
+    void executeSearch(nextPage);
+    resultsTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const renderPagination = () =>
+    totalCount !== null && totalCount > perPage ? (
+      <div className="pagination">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={page <= 1 || loading}
+          onClick={() => handlePageChange(page - 1)}
+        >
+          <ChevronLeft size={15} /> Prev
+        </button>
+        <span className="page-indicator">
+          Page {page} of {maxPages}
+        </span>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={page >= maxPages || loading}
+          onClick={() => handlePageChange(page + 1)}
+        >
+          Next <ChevronRight size={15} />
+        </button>
+      </div>
+    ) : null;
 
   return (
     <div className="search-view">
@@ -400,35 +431,13 @@ export const SearchView: React.FC<SearchViewProps> = ({
 
       {/* Results */}
       {totalCount !== null && (
-        <section className="results-section">
+        <section className="results-section" ref={resultsTopRef}>
           <div className="results-meta">
             <span>
               Found <strong>{totalCount.toLocaleString()}</strong>{' '}
               {mode === 'repos' ? 'repositories' : 'file / code matches'}
             </span>
-            {totalCount > perPage && (
-              <div className="pagination">
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={page <= 1 || loading}
-                  onClick={() => void executeSearch(page - 1)}
-                >
-                  <ChevronLeft size={15} /> Prev
-                </button>
-                <span className="page-indicator">
-                  Page {page} of {maxPages}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={page >= maxPages || loading}
-                  onClick={() => void executeSearch(page + 1)}
-                >
-                  Next <ChevronRight size={15} />
-                </button>
-              </div>
-            )}
+            {renderPagination()}
           </div>
 
           {mode === 'repos' && (
@@ -558,6 +567,14 @@ export const SearchView: React.FC<SearchViewProps> = ({
                   </article>
                 );
               })}
+            </div>
+          )}
+          {totalCount > perPage && (
+            <div className="results-meta results-footer">
+              <span className="muted-text">
+                Showing page {page} of {maxPages}
+              </span>
+              {renderPagination()}
             </div>
           )}
         </section>
