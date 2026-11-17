@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Radar, LogOut, KeyRound, Gauge } from 'lucide-react';
+import { Radar, LogOut, KeyRound, Gauge, UserCheck } from 'lucide-react';
 import { GitHubUser, RateLimitInfo } from './types/github';
 import { setRateLimitListener, verifyToken } from './services/githubApi';
+import { AppUser, fetchAppSession, logoutApp } from './services/appAuth';
 import { AuthModal } from './components/AuthModal';
+import { AppLoginView } from './components/AppLoginView';
 import { SearchView } from './components/SearchView';
 import { ScannerView } from './components/ScannerView';
 
@@ -17,14 +19,20 @@ function loadStoredToken(): string {
 }
 
 export function App() {
+  // Step 1: App-level authentication state
+  const [appBootstrapping, setAppBootstrapping] = useState(true);
+  const [appConfigured, setAppConfigured] = useState(true);
+  const [appUser, setAppUser] = useState<AppUser | null>(null);
+
+  // Step 2: GitHub authentication state (only active after appUser is logged in)
   const [token, setToken] = useState<string>(() => loadStoredToken());
-  const [user, setUser] = useState<GitHubUser | null>(null);
+  const [ghUser, setGhUser] = useState<GitHubUser | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
 
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
   const [authLoading, setAuthLoading] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [bootstrapping, setBootstrapping] = useState<boolean>(Boolean(loadStoredToken()));
+  const [ghBootstrapping, setGhBootstrapping] = useState<boolean>(false);
 
   const [selectedRepo, setSelectedRepo] = useState<{ owner: string; repo: string } | null>(null);
 
@@ -33,17 +41,38 @@ export function App() {
     return () => setRateLimitListener(null);
   }, []);
 
+  // Check App session on mount
   useEffect(() => {
+    fetchAppSession()
+      .then((status) => {
+        setAppConfigured(status.configured);
+        if (status.authenticated && status.user) {
+          setAppUser(status.user);
+        }
+      })
+      .catch(() => {
+        setAppUser(null);
+      })
+      .finally(() => {
+        setAppBootstrapping(false);
+      });
+  }, []);
+
+  // Once appUser is authenticated, verify stored GitHub PAT or prompt for one
+  useEffect(() => {
+    if (!appUser) return;
+
     const initial = loadStoredToken();
     if (!initial) {
-      setBootstrapping(false);
+      setGhBootstrapping(false);
       setAuthModalOpen(true);
       return;
     }
 
+    setGhBootstrapping(true);
     verifyToken(initial)
       .then((u) => {
-        setUser(u);
+        setGhUser(u);
         setToken(initial);
       })
       .catch(() => {
@@ -53,11 +82,11 @@ export function App() {
         setAuthModalOpen(true);
       })
       .finally(() => {
-        setBootstrapping(false);
+        setGhBootstrapping(false);
       });
-  }, []);
+  }, [appUser]);
 
-  const handleAuthenticate = async (newToken: string, persist: boolean) => {
+  const handleAuthenticateGitHub = async (newToken: string, persist: boolean) => {
     setAuthLoading(true);
     setAuthError(null);
     try {
@@ -72,7 +101,7 @@ export function App() {
       }
 
       setToken(newToken);
-      setUser(verifiedUser);
+      setGhUser(verifiedUser);
       setAuthModalOpen(false);
     } catch (err) {
       setAuthError((err as Error).message || 'Authentication failed');
@@ -81,15 +110,48 @@ export function App() {
     }
   };
 
-  const handleDisconnect = () => {
+  const handleDisconnectGitHub = () => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken('');
-    setUser(null);
+    setGhUser(null);
     setSelectedRepo(null);
     setRateLimit(null);
     setAuthModalOpen(true);
   };
+
+  const handleAppLogout = async () => {
+    await logoutApp();
+    setAppUser(null);
+    setGhUser(null);
+    setSelectedRepo(null);
+    setRateLimit(null);
+    setAuthModalOpen(false);
+  };
+
+  if (appBootstrapping) {
+    return (
+      <div className="app-shell">
+        <main className="main-content">
+          <div className="panel loading-panel">
+            <div className="spinner" />
+            <p>Checking session...</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!appUser) {
+    return (
+      <div className="app-shell">
+        <AppLoginView
+          configured={appConfigured}
+          onSuccess={(user) => setAppUser(user)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -122,32 +184,33 @@ export function App() {
               </div>
             )}
 
-            {user ? (
+            {ghUser ? (
               <div className="user-menu">
                 <a
-                  href={user.html_url}
+                  href={ghUser.html_url}
                   target="_blank"
                   rel="noreferrer"
                   className="user-badge"
+                  title="Connected GitHub Account"
                 >
-                  <img src={user.avatar_url} alt={user.login} className="avatar-xs" />
-                  <span>@{user.login}</span>
+                  <img src={ghUser.avatar_url} alt={ghUser.login} className="avatar-xs" />
+                  <span>@{ghUser.login}</span>
                 </a>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
                   onClick={() => setAuthModalOpen(true)}
-                  title="Switch Token"
+                  title="Switch GitHub Token"
                 >
                   <KeyRound size={14} />
                 </button>
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  onClick={handleDisconnect}
-                  title="Disconnect"
+                  onClick={handleDisconnectGitHub}
+                  title="Disconnect GitHub"
                 >
-                  <LogOut size={14} />
+                  GH Off
                 </button>
               </div>
             ) : (
@@ -159,17 +222,33 @@ export function App() {
                 <KeyRound size={14} /> Connect GitHub
               </button>
             )}
+
+            <div className="app-user-divider" />
+
+            <div className="user-menu">
+              <span className="pill pill-neutral" title="App Account">
+                <UserCheck size={12} /> {appUser.username}
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => void handleAppLogout()}
+                title="Sign out of GitFind"
+              >
+                <LogOut size={14} />
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       <main className="main-content">
-        {bootstrapping ? (
+        {ghBootstrapping ? (
           <div className="panel loading-panel">
             <div className="spinner" />
             <p>Verifying GitHub credentials...</p>
           </div>
-        ) : user && token ? (
+        ) : ghUser && token ? (
           selectedRepo ? (
             <ScannerView
               token={token}
@@ -180,7 +259,7 @@ export function App() {
           ) : (
             <SearchView
               token={token}
-              user={user}
+              user={ghUser}
               onSelectRepoToScan={(owner, repo) => setSelectedRepo({ owner, repo })}
             />
           )
@@ -189,7 +268,7 @@ export function App() {
             <KeyRound size={36} className="muted-icon" />
             <h2>Connect your GitHub Personal Access Token to begin</h2>
             <p className="muted-text">
-              Search public or private repositories and scan them directly in your browser.
+              Signed in as <strong>{appUser.username}</strong>. Now connect your GitHub PAT to search and scan repositories.
             </p>
             <button
               type="button"
@@ -204,9 +283,9 @@ export function App() {
 
       <AuthModal
         isOpen={authModalOpen}
-        canClose={Boolean(user)}
+        canClose={Boolean(ghUser)}
         onClose={() => setAuthModalOpen(false)}
-        onAuthenticate={handleAuthenticate}
+        onAuthenticate={handleAuthenticateGitHub}
         error={authError}
         loading={authLoading}
       />
