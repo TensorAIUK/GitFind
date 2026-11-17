@@ -2,6 +2,9 @@
   "name": "gitfind",
   "main": "worker/index.ts",
   "compatibility_date": "2025-01-01",
+  "vars": {
+    "APP_USERNAME": "gitfind"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
