@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/main.tsx","./src/components/AuthModal.tsx","./src/components/ScannerView.tsx","./src/components/SearchView.tsx","./src/services/githubApi.ts","./src/services/scanner.ts","./src/types/github.ts"],"version":"5.9.3"}
