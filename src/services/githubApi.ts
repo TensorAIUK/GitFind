@@ -6,7 +6,7 @@ import {
   RateLimitInfo,
 } from '../types/github';
 
-const GITHUB_API_BASE = 'https://api.github.com';
+const GITHUB_API_BASE = '/api/github';
 
 export class GitHubApiError extends Error {
   status: number;
@@ -31,7 +31,6 @@ async function githubFetch<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     Accept: options.accept ?? 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
   };
 
   if (token.trim()) {
@@ -40,6 +39,7 @@ async function githubFetch<T>(
 
   const res = await fetch(`${GITHUB_API_BASE}${path}`, {
     headers,
+    credentials: 'same-origin',
     signal: options.signal,
   });
 

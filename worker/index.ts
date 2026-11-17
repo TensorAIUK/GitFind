@@ -339,9 +339,58 @@ async function handleMe(request: Request, env: Env): Promise<Response> {
   });
 }
 
+async function handleGitHubProxy(request: Request, env: Env, url: URL): Promise<Response> {
+  const secret = getAuthSecret(env);
+  if (!secret) {
+    return json({ message: 'Server auth is not configured.' }, 500);
+  }
+
+  const cookie = getCookie(request, SESSION_COOKIE);
+  const session = cookie ? await verifySessionToken(cookie, secret) : null;
+  if (!session) {
+    return json({ message: 'App authentication required.' }, 401);
+  }
+
+  const ghPath = url.pathname.replace(/^\/api\/github/, '') || '/';
+  const targetUrl = `https://api.github.com${ghPath}${url.search}`;
+
+  const headers = new Headers();
+  headers.set('User-Agent', 'GitFind-Cloudflare-Worker');
+  headers.set('Accept', request.headers.get('Accept') || 'application/vnd.github+json');
+  headers.set('X-GitHub-Api-Version', '2022-11-28');
+
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader) {
+    headers.set('Authorization', authHeader);
+  }
+
+  const ghRes = await fetch(targetUrl, {
+    method: request.method,
+    headers,
+  });
+
+  const outHeaders = new Headers();
+  const ct = ghRes.headers.get('Content-Type');
+  if (ct) outHeaders.set('Content-Type', ct);
+
+  for (const h of ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset']) {
+    const val = ghRes.headers.get(h);
+    if (val) outHeaders.set(h, val);
+  }
+
+  return new Response(ghRes.body, {
+    status: ghRes.status,
+    headers: outHeaders,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname.startsWith('/api/github/')) {
+      return handleGitHubProxy(request, env, url);
+    }
 
     if (url.pathname === '/api/auth/login' && request.method === 'POST') {
       return handleLogin(request, env);
