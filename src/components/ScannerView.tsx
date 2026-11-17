@@ -40,6 +40,13 @@ interface ScannerViewProps {
   owner: string;
   repoName: string;
   onBack: () => void;
+  onPreviewFile: (target: {
+    owner: string;
+    repo: string;
+    path: string;
+    branch: string;
+    line?: number;
+  }) => void;
 }
 
 type ScannerTab = 'findings' | 'health' | 'files';
@@ -55,6 +62,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   owner,
   repoName,
   onBack,
+  onPreviewFile,
 }) => {
   const [loadingTree, setLoadingTree] = useState(true);
   const [treeError, setTreeError] = useState<string | null>(null);
@@ -510,16 +518,33 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                             <strong>{f.title}</strong>
                             <span className="pill pill-neutral">{f.category}</span>
                           </div>
-                          <a
-                            href={githubLineUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="finding-link"
-                          >
-                            {f.path}
-                            {f.line ? `:${f.line}` : ''}
-                            <ExternalLink size={12} />
-                          </a>
+                          <div className="export-actions">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() =>
+                                onPreviewFile({
+                                  owner: repo.owner.login,
+                                  repo: repo.name,
+                                  path: f.path,
+                                  branch: repo.default_branch,
+                                  line: f.line,
+                                })
+                              }
+                            >
+                              <Eye size={12} /> Preview
+                            </button>
+                            <a
+                              href={githubLineUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="finding-link"
+                            >
+                              {f.path}
+                              {f.line ? `:${f.line}` : ''}
+                              <ExternalLink size={12} />
+                            </a>
+                          </div>
                         </div>
                         <p className="finding-desc">{f.description}</p>
                         {displaySnippet && <pre className="finding-snippet">{displaySnippet}</pre>}
@@ -608,14 +633,31 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
               <div className="file-list">
                 {filteredTreeFiles.map((item) => (
                   <div key={item.path} className="file-row">
-                    <a
-                      href={`${repo.html_url}/blob/${repo.default_branch}/${item.path}`}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      className="file-preview-btn"
+                      onClick={() =>
+                        onPreviewFile({
+                          owner: repo.owner.login,
+                          repo: repo.name,
+                          path: item.path,
+                          branch: repo.default_branch,
+                        })
+                      }
                     >
                       {item.path}
-                    </a>
-                    <span className="muted-text">{formatBytes(item.size ?? 0)}</span>
+                    </button>
+                    <div className="export-actions" style={{ alignItems: 'center' }}>
+                      <span className="muted-text">{formatBytes(item.size ?? 0)}</span>
+                      <a
+                        href={`${repo.html_url}/blob/${repo.default_branch}/${item.path}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open on GitHub"
+                      >
+                        <ExternalLink size={13} />
+                      </a>
+                    </div>
                   </div>
                 ))}
               </div>

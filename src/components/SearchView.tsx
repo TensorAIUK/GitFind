@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Search,
   Star,
@@ -12,6 +12,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowRight,
+  Eye,
+  FileType,
 } from 'lucide-react';
 import { GitHubCodeMatch, GitHubRepo, GitHubUser } from '../types/github';
 import { parseRepoInput, searchCode, searchRepositories } from '../services/githubApi';
@@ -20,10 +22,16 @@ interface SearchViewProps {
   token: string;
   user: GitHubUser;
   onSelectRepoToScan: (owner: string, repo: string) => void;
+  onPreviewFile: (target: {
+    owner: string;
+    repo: string;
+    path: string;
+    branch: string;
+  }) => void;
 }
 
 type SearchMode = 'repos' | 'code';
-type ScopeFilter = 'all' | 'mine';
+type ScopeFilter = 'all' | 'mine' | 'custom';
 
 const LANGUAGES = [
   '',
@@ -40,6 +48,15 @@ const LANGUAGES = [
   'Shell',
 ];
 
+const FILE_SEARCH_PRESETS = [
+  { label: 'package.json', filename: 'package.json', extension: '', query: '' },
+  { label: 'Dockerfile', filename: 'Dockerfile', extension: '', query: '' },
+  { label: 'Terraform (.tf)', filename: '', extension: 'tf', query: '' },
+  { label: 'Workflows (.yml)', filename: '', extension: 'yml', query: 'path:.github/workflows' },
+  { label: 'Env files', filename: '.env', extension: '', query: '' },
+  { label: 'SQL schemas', filename: '', extension: 'sql', query: '' },
+];
+
 function formatDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
@@ -54,13 +71,17 @@ export const SearchView: React.FC<SearchViewProps> = ({
   token,
   user,
   onSelectRepoToScan,
+  onPreviewFile,
 }) => {
   const [directRepo, setDirectRepo] = useState('');
   const [directError, setDirectError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<SearchMode>('repos');
   const [scope, setScope] = useState<ScopeFilter>('all');
+  const [customOwner, setCustomOwner] = useState('');
   const [query, setQuery] = useState('');
+  const [filename, setFilename] = useState('');
+  const [extension, setExtension] = useState('');
   const [language, setLanguage] = useState('');
   const [minStars, setMinStars] = useState('');
   const [sort, setSort] = useState<'best-match' | 'stars' | 'forks' | 'updated'>('best-match');
@@ -71,6 +92,24 @@ export const SearchView: React.FC<SearchViewProps> = ({
   const [totalCount, setTotalCount] = useState<number | null>(null);
   const [repoResults, setRepoResults] = useState<GitHubRepo[]>([]);
   const [codeResults, setCodeResults] = useState<GitHubCodeMatch[]>([]);
+
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keyboard shortcut: "/" focuses search input
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === '/' &&
+        document.activeElement?.tagName !== 'INPUT' &&
+        document.activeElement?.tagName !== 'TEXTAREA'
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleDirectScan = (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,14 +126,28 @@ export const SearchView: React.FC<SearchViewProps> = ({
     const parts: string[] = [];
     if (query.trim()) parts.push(query.trim());
     if (scope === 'mine') parts.push(`user:${user.login}`);
+    if (scope === 'custom' && customOwner.trim()) parts.push(`user:${customOwner.trim()}`);
     if (language) parts.push(`language:${language}`);
-    if (mode === 'repos' && minStars.trim() && !Number.isNaN(Number(minStars))) {
-      parts.push(`stars:>=${Number(minStars)}`);
+
+    if (mode === 'repos') {
+      if (minStars.trim() && !Number.isNaN(Number(minStars))) {
+        parts.push(`stars:>=${Number(minStars)}`);
+      }
+    } else {
+      if (filename.trim()) parts.push(`filename:${filename.trim()}`);
+      if (extension.trim()) {
+        const cleanExt = extension.trim().replace(/^\./, '');
+        parts.push(`extension:${cleanExt}`);
+      }
     }
 
     const fullQuery = parts.join(' ').trim();
     if (!fullQuery) {
-      setError('Enter a search term or select "My Repos" to list your repositories.');
+      setError(
+        mode === 'repos'
+          ? 'Enter a search term or select "My Repos" to list your repositories.'
+          : 'Enter a keyword, file name, or file extension to search across repositories.'
+      );
       return;
     }
 
@@ -176,7 +229,10 @@ export const SearchView: React.FC<SearchViewProps> = ({
             <button
               type="button"
               className={mode === 'repos' ? 'active' : ''}
-              onClick={() => setMode('repos')}
+              onClick={() => {
+                setMode('repos');
+                setError(null);
+              }}
             >
               <FolderGit2 size={15} />
               Repositories
@@ -184,48 +240,115 @@ export const SearchView: React.FC<SearchViewProps> = ({
             <button
               type="button"
               className={mode === 'code' ? 'active' : ''}
-              onClick={() => setMode('code')}
+              onClick={() => {
+                setMode('code');
+                setError(null);
+              }}
             >
               <Code2 size={15} />
-              Code
+              Files &amp; Code
             </button>
           </div>
 
-          <div className="segmented-control" role="group" aria-label="Search scope">
-            <button
-              type="button"
-              className={scope === 'all' ? 'active' : ''}
-              onClick={() => setScope('all')}
-            >
-              All GitHub
-            </button>
-            <button
-              type="button"
-              className={scope === 'mine' ? 'active' : ''}
-              onClick={() => setScope('mine')}
-            >
-              My Repos (@{user.login})
-            </button>
+          <div className="scope-group">
+            <div className="segmented-control" role="group" aria-label="Search scope">
+              <button
+                type="button"
+                className={scope === 'all' ? 'active' : ''}
+                onClick={() => setScope('all')}
+              >
+                All GitHub
+              </button>
+              <button
+                type="button"
+                className={scope === 'mine' ? 'active' : ''}
+                onClick={() => setScope('mine')}
+              >
+                My Repos (@{user.login})
+              </button>
+              <button
+                type="button"
+                className={scope === 'custom' ? 'active' : ''}
+                onClick={() => setScope('custom')}
+              >
+                User / Org
+              </button>
+            </div>
+            {scope === 'custom' && (
+              <input
+                type="text"
+                value={customOwner}
+                onChange={(e) => setCustomOwner(e.target.value)}
+                placeholder="owner or org"
+                className="custom-owner-input"
+              />
+            )}
           </div>
         </div>
+
+        {mode === 'code' && (
+          <div className="preset-row">
+            <span className="preset-label">Quick file presets:</span>
+            {FILE_SEARCH_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                className="preset-chip"
+                onClick={() => {
+                  setFilename(preset.filename);
+                  setExtension(preset.extension);
+                  setQuery(preset.query);
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         <form onSubmit={handleSearchSubmit} className="search-form">
           <div className="search-input-wrap">
             <Search size={18} className="search-icon" />
             <input
+              ref={searchInputRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={
                 mode === 'repos'
-                  ? 'Search repositories (e.g. "llm agent", "topic:cli", "org:vercel")...'
-                  : 'Search code across repos (e.g. "AKIA", "dangerouslySetInnerHTML", "repo:owner/name")...'
+                  ? 'Search repositories (press / to focus)...'
+                  : 'Optional code keyword (or leave blank to search by file name / extension)...'
               }
             />
             <button type="submit" className="btn btn-primary" disabled={loading}>
               {loading ? 'Searching...' : 'Search'}
             </button>
           </div>
+
+          {mode === 'code' && (
+            <div className="file-filters-grid">
+              <label className="filter-item-box">
+                <span>
+                  <FileType size={13} /> File name
+                </span>
+                <input
+                  type="text"
+                  value={filename}
+                  onChange={(e) => setFilename(e.target.value)}
+                  placeholder="e.g. package.json, Dockerfile, .env"
+                />
+              </label>
+              <label className="filter-item-box">
+                <span>Extension / Type</span>
+                <input
+                  type="text"
+                  value={extension}
+                  onChange={(e) => setExtension(e.target.value)}
+                  placeholder="e.g. py, ts, tf, yml, pem"
+                />
+              </label>
+            </div>
+          )}
 
           <div className="filter-row">
             <label className="filter-item">
@@ -281,7 +404,7 @@ export const SearchView: React.FC<SearchViewProps> = ({
           <div className="results-meta">
             <span>
               Found <strong>{totalCount.toLocaleString()}</strong>{' '}
-              {mode === 'repos' ? 'repositories' : 'code matches'}
+              {mode === 'repos' ? 'repositories' : 'file / code matches'}
             </span>
             {totalCount > perPage && (
               <div className="pagination">
@@ -382,11 +505,16 @@ export const SearchView: React.FC<SearchViewProps> = ({
             <div className="code-results-list">
               {codeResults.map((item, idx) => {
                 const [owner, repoName] = item.repository.full_name.split('/');
+                const branch = item.repository.default_branch ?? 'HEAD';
                 return (
                   <article key={`${item.sha}-${idx}`} className="code-card">
                     <div className="code-card-header">
-                      <div>
+                      <div className="repo-title-row">
                         <span className="code-repo">{item.repository.full_name}</span>
+                        <span className={`pill ${item.repository.private ? 'pill-warn' : 'pill-neutral'}`}>
+                          {item.repository.private ? <Lock size={10} /> : <Globe size={10} />}
+                          {item.repository.private ? 'Private' : 'Public'}
+                        </span>
                         <span className="sep">/</span>
                         <a
                           href={item.html_url}
@@ -397,14 +525,30 @@ export const SearchView: React.FC<SearchViewProps> = ({
                           {item.path} <ExternalLink size={12} />
                         </a>
                       </div>
-                      <button
-                        type="button"
-                        className="btn btn-accent btn-sm"
-                        onClick={() => onSelectRepoToScan(owner, repoName)}
-                      >
-                        <Radar size={14} />
-                        Scan Repo
-                      </button>
+                      <div className="export-actions">
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() =>
+                            onPreviewFile({
+                              owner,
+                              repo: repoName,
+                              path: item.path,
+                              branch,
+                            })
+                          }
+                        >
+                          <Eye size={13} /> Preview
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-accent btn-sm"
+                          onClick={() => onSelectRepoToScan(owner, repoName)}
+                        >
+                          <Radar size={14} />
+                          Scan Repo
+                        </button>
+                      </div>
                     </div>
                     {item.text_matches && item.text_matches.length > 0 && (
                       <pre className="code-fragment">

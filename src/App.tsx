@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Radar, LogOut, KeyRound, Gauge, UserCheck } from 'lucide-react';
+import { Radar, LogOut, KeyRound, Gauge, UserCheck, Search, FolderSearch } from 'lucide-react';
 import { GitHubUser, RateLimitInfo } from './types/github';
 import { setRateLimitListener, verifyToken } from './services/githubApi';
 import { AppUser, fetchAppSession, logoutApp } from './services/appAuth';
 import { AuthModal } from './components/AuthModal';
 import { AppLoginView } from './components/AppLoginView';
 import { SearchView } from './components/SearchView';
+import { RepoSweepView } from './components/RepoSweepView';
 import { ScannerView } from './components/ScannerView';
+import { FilePreviewModal } from './components/FilePreviewModal';
 
 const TOKEN_STORAGE_KEY = 'gitfind_github_pat';
 
@@ -16,6 +18,16 @@ function loadStoredToken(): string {
     sessionStorage.getItem(TOKEN_STORAGE_KEY) ??
     ''
   );
+}
+
+type WorkspaceTab = 'search' | 'sweep';
+
+interface PreviewTarget {
+  owner: string;
+  repo: string;
+  path: string;
+  branch: string;
+  line?: number;
 }
 
 export function App() {
@@ -34,7 +46,9 @@ export function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [ghBootstrapping, setGhBootstrapping] = useState<boolean>(false);
 
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>('search');
   const [selectedRepo, setSelectedRepo] = useState<{ owner: string; repo: string } | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
 
   useEffect(() => {
     setRateLimitListener((info) => setRateLimit(info));
@@ -157,19 +171,43 @@ export function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-inner">
-          <button
-            type="button"
-            className="brand-btn"
-            onClick={() => setSelectedRepo(null)}
-          >
-            <div className="brand-logo">
-              <Radar size={20} />
-            </div>
-            <div>
-              <span className="brand-name">GitFind</span>
-              <span className="brand-tag">Repo Search &amp; Scanner</span>
-            </div>
-          </button>
+          <div className="topbar-left">
+            <button
+              type="button"
+              className="brand-btn"
+              onClick={() => {
+                setSelectedRepo(null);
+                setActiveTab('search');
+              }}
+            >
+              <div className="brand-logo">
+                <Radar size={20} />
+              </div>
+              <div>
+                <span className="brand-name">GitFind</span>
+                <span className="brand-tag">Repo Search &amp; Scanner</span>
+              </div>
+            </button>
+
+            {ghUser && !selectedRepo && (
+              <nav className="topbar-nav" aria-label="Workspace navigation">
+                <button
+                  type="button"
+                  className={activeTab === 'search' ? 'active' : ''}
+                  onClick={() => setActiveTab('search')}
+                >
+                  <Search size={14} /> Search
+                </button>
+                <button
+                  type="button"
+                  className={activeTab === 'sweep' ? 'active' : ''}
+                  onClick={() => setActiveTab('sweep')}
+                >
+                  <FolderSearch size={14} /> Sweep My Repos
+                </button>
+              </nav>
+            )}
+          </div>
 
           <div className="topbar-right">
             {rateLimit && (
@@ -255,12 +293,20 @@ export function App() {
               owner={selectedRepo.owner}
               repoName={selectedRepo.repo}
               onBack={() => setSelectedRepo(null)}
+              onPreviewFile={(target) => setPreviewTarget(target)}
             />
-          ) : (
+          ) : activeTab === 'search' ? (
             <SearchView
               token={token}
               user={ghUser}
               onSelectRepoToScan={(owner, repo) => setSelectedRepo({ owner, repo })}
+              onPreviewFile={(target) => setPreviewTarget(target)}
+            />
+          ) : (
+            <RepoSweepView
+              token={token}
+              onSelectRepoToScan={(owner, repo) => setSelectedRepo({ owner, repo })}
+              onPreviewFile={(target) => setPreviewTarget(target)}
             />
           )
         ) : (
@@ -288,6 +334,12 @@ export function App() {
         onAuthenticate={handleAuthenticateGitHub}
         error={authError}
         loading={authLoading}
+      />
+
+      <FilePreviewModal
+        token={token}
+        target={previewTarget}
+        onClose={() => setPreviewTarget(null)}
       />
     </div>
   );

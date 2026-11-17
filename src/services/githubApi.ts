@@ -134,6 +134,21 @@ export async function searchCode(
   });
 }
 
+export async function listUserRepos(
+  token: string,
+  page = 1,
+  perPage = 100,
+  signal?: AbortSignal
+): Promise<GitHubRepo[]> {
+  const qs = new URLSearchParams({
+    per_page: String(perPage),
+    page: String(page),
+    sort: 'updated',
+    affiliation: 'owner,collaborator,organization_member',
+  });
+  return githubFetch<GitHubRepo[]>(`/user/repos?${qs.toString()}`, token, { signal });
+}
+
 export async function getRepo(
   token: string,
   owner: string,
